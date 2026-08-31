@@ -171,6 +171,38 @@ Both cost real debugging time, and neither raises an error.
 
 **2. `on_session_reset` reports the NEW session's id.** It passes `session_id` = the freshly created session and puts the conversation that just ended in `old_session_id`. Extracting `session_id` there reads an empty transcript and silently writes nothing — the failure looks like "the extractor stopped working," with no error. Hence `old_session_id or session_id`.
 
+## Hook callbacks share a thread, in registration order
+
+Callbacks for one hook run sequentially, in the order their plugins registered. If another plugin resets state on the same hook you extract on, and it registered first, its cleanup has already happened by the time you run.
+
+This bites any privacy or suppression plugin. A plugin that suppresses memory writes while active will typically clear itself on `on_session_reset` — the same hook you just moved extraction to. Reading its flag at the boundary always returns "off," so a session that was explicitly private gets extracted anyway. Nothing errors, and the write looks legitimate.
+
+The fix is to observe the state *during* the conversation, on the per-turn hook, and read the record at the boundary:
+
+```python
+_incognito_seen: "OrderedDict[str, bool]" = OrderedDict()
+
+def _note_incognito(session_id: str = "", **_ignored) -> None:
+    """Flag-read only: no LLM call, no writes. Cheap enough to run per turn."""
+    if session_id and _privacy_plugin_active():
+        _incognito_seen[session_id] = True
+
+def register(ctx):
+    ctx.register_hook("on_session_finalize", _on_boundary)
+    ctx.register_hook("on_session_reset", _on_boundary)
+    ctx.register_hook("on_session_end", _note_incognito)   # observe only
+```
+
+`on_session_end` is fine for this. The rule is not "never touch that hook" — it is "never do expensive work there." A flag read per turn costs nothing; a transcript read plus a model call costs 428 calls a day.
+
+At the boundary, check the record first and fall back to a live read (which still covers idle expiry, where nothing has cleared the flag):
+
+```python
+_incognito = _incognito_seen.pop(session_id, False) or _privacy_plugin_active()
+```
+
+Verify the order for your own install rather than assuming it — see Step 5.
+
 ## When memory actually lands
 
 - `/new` or `/reset` — immediately.
