@@ -69,7 +69,7 @@ Fix shipped in `memory-session-end/__init__.py`:
 - `_spill` dedup upgraded from 80-char substring to two-layer:
   substring + `_too_similar` token-set Jaccard (threshold 0.6) so reordered /
   lightly-reworded re-extractions are caught (substring missed them).
-- Entry cap hard-enforced in code: `entries[:3]` in `_on_session_end`, so a
+- Entry cap hard-enforced in code: `entries[:3]` in the hook callback, so a
   chatty extraction can't flood pending regardless of model drift.
 - Tests: `plugins/memory-session-end/test_blindspot.py` (relevance selection,
   core-file exclusion, byte cap, semantic dedup, entry cap), wired into

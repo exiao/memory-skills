@@ -19,7 +19,8 @@ Read **only** the guide for your agent — each is self-contained for install st
 |----------|-------------|
 | **Cursor** | [`references/cursor.md`](references/cursor.md) — alwaysApply rule + optional `sessionEnd` hook |
 | **Claude Code** | [`references/claude-code.md`](references/claude-code.md) — `CLAUDE.md` + native `SessionEnd` hook |
-| **OpenCode / Hermes / OpenClaw / any file-based agent** | [`references/generic.md`](references/generic.md) — `~/.hermes` workspace + operating-instructions rule |
+| **Hermes Agent** | [`references/hermes.md`](references/hermes.md) — plugin on `on_session_finalize` + `on_session_reset` |
+| **OpenCode / OpenClaw / any file-based agent** | [`references/generic.md`](references/generic.md) — `~/.hermes` workspace + operating-instructions rule |
 
 ---
 
@@ -97,6 +98,17 @@ Read **only** the guide for your agent — each is self-contained for install st
 
 Rules: date = creation date only (never updated); `[rule]` entries are hard constraints; **capture incrementally** (write the moment a fact appears, not at session end); never fabricate dates; keep under ~100 entries (use `memory-gc` to prune).
 
+### Session-end extraction: verify the hook fires once
+
+Extraction is expensive — a transcript read plus a model call. Before wiring it to a hook, confirm the hook fires at a **real session boundary** and not once per message. Hook names lie: Hermes Agent's `on_session_end` runs after every user turn (see [`references/hermes.md`](references/hermes.md)), and a per-turn extraction on a 46-turn session costs 46 model calls to produce one session's worth of memory, most of it discarded by dedup afterwards.
+
+Two checks before trusting any session-end hook:
+
+1. **Count the fires.** Send three messages in one session and confirm the extractor ran once, not three times. Log lines or a counter beat reading the docs.
+2. **Confirm which session id you get.** A hook that fires on reset may hand you the *new* session's id, so extraction reads an empty transcript and writes nothing — with no error. Check the id against the conversation you expect.
+
+If a hook fires at both a finalize and a reset for the same conversation, guard with a claim set keyed on session id so only the first one does the work.
+
 ### Episodes
 
 Daily session summaries — the middle recall tier. One file per day, sessions appended:
@@ -171,6 +183,8 @@ $WORKSPACE/
 | Agent doesn't remember anything | Confirm MEMORY.md is loaded at session start (rule / CLAUDE.md / system prompt) |
 | Memory grows unbounded | Set up the `memory-gc` cron job; check decay rules |
 | Session-end extraction misses things | Prefer incremental capture; if extracting, raise turn count (40-50) |
+| Extraction runs constantly / model bill spikes | The hook fires per-turn, not per-session. Count the fires; move to a real boundary hook |
+| Extraction writes nothing, no error in logs | The hook handed you a new/empty session id. Log the id and the turn count it read |
 | Auto-extraction writes nothing | The extractor CLI isn't installed or authenticated (e.g. `cursor-agent login`) |
 | Recall returns nothing | Use both grep (exact) AND semantic search (fuzzy) |
 | `.pending.md` keeps growing | GC isn't running or MEMORY.md is at capacity — decay more aggressively |
